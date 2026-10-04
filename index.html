@@ -1,147 +1,126 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Карта війни в Україні (редагована)</title>
+  <title>Карта України - редагування контуру</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- Leaflet-Geoman (редагування) -->
-  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
-  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
+  <!-- Leaflet-Geoman -->
+  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css" />
+  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"></script>
 
   <style>
-    body { margin: 0; padding: 0; font-family: sans-serif; }
+    body { margin: 0; padding: 0; }
     #map { height: 100vh; width: 100%; }
-    
-    .controls {
+    .info {
       position: absolute;
-      top: 15px;
-      right: 15px;
+      top: 12px;
+      right: 12px;
       z-index: 1000;
       background: white;
-      padding: 12px;
+      padding: 12px 16px;
       border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    }
-    
-    .controls button {
-      display: block;
-      width: 100%;
-      margin: 6px 0;
-      padding: 8px 12px;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      font-family: sans-serif;
       font-size: 14px;
     }
-    
-    .btn-edit { background: #3498db; color: white; }
-    .btn-export { background: #27ae60; color: white; }
-    .btn-reset { background: #e74c3c; color: white; }
+    .info button {
+      margin-top: 8px;
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      background: #27ae60;
+      color: white;
+      cursor: pointer;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
 
-  <div id="map"></div>
+<div id="map"></div>
 
-  <div class="controls">
-    <button class="btn-edit" onclick="toggleEdit()">Редагувати контур</button>
-    <button class="btn-export" onclick="exportGeoJSON()">Завантажити GeoJSON</button>
-    <button class="btn-reset" onclick="location.reload()">Скинути зміни</button>
-  </div>
+<div class="info">
+  <b>Редагування контуру</b><br>
+  1. Натисни кнопку Edit на панелі зліва<br>
+  2. Клікни по червоному контуру<br>
+  3. Тягни вершини
+  <button onclick="downloadGeoJSON()">Завантажити GeoJSON</button>
+</div>
 
-  <script>
-    // Створюємо карту
-    const map = L.map('map').setView([48.5, 37.5], 6);
+<script>
+  const map = L.map('map').setView([48.4, 37.5], 6);
 
-    // Підложка
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
 
-    // Додаємо панель інструментів Geoman
-    map.pm.addControls({
-      position: 'topleft',
-      drawMarker: false,
-      drawCircleMarker: false,
-      drawPolyline: false,
-      drawRectangle: false,
-      drawCircle: false,
-      drawText: false,
-      drawPolygon: true,     // можна малювати нові полігони
-      editMode: true,        // редагування
-      dragMode: true,        // перетягування
-      removalMode: true,     // видалення
-      cutPolygon: true       // вирізати частини
-    });
+  // Панель інструментів
+  map.pm.addControls({
+    position: 'topleft',
+    drawMarker: false,
+    drawCircleMarker: false,
+    drawPolyline: false,
+    drawRectangle: false,
+    drawCircle: false,
+    drawText: false,
+    drawPolygon: true,
+    editMode: true,
+    dragMode: true,
+    removalMode: true,
+    cutPolygon: false
+  });
 
-    let occupiedLayer = null;
-    let isEditing = false;
+  let occupiedLayer = null;
 
-    // Завантаження даних DeepState
-    // Увага: заміни дату на актуальну, або використовуй останній файл
-    const geojsonUrl = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20260116.geojson';
+  // Актуальне посилання (станом на 4 жовтня 2026)
+  const url = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20261004.geojson';
 
-    fetch(geojsonUrl)
-      .then(res => res.json())
-      .then(data => {
-        occupiedLayer = L.geoJSON(data, {
-          style: {
-            color: '#c0392b',
-            weight: 2,
-            fillColor: '#e74c3c',
-            fillOpacity: 0.4
-          },
-          // Робимо шар редагованим
-          pmIgnore: false
-        }).addTo(map);
+  fetch(url)
+    .then(r => {
+      if (!r.ok) throw new Error('Не вдалося завантажити файл');
+      return r.json();
+    })
+    .then(data => {
+      occupiedLayer = L.geoJSON(data, {
+        style: {
+          color: '#c0392b',
+          weight: 2,
+          fillColor: '#e74c3c',
+          fillOpacity: 0.45
+        }
+      }).addTo(map);
 
-        // Автоматично вмикаємо редагування всіх полігонів
-        occupiedLayer.eachLayer(layer => {
-          layer.pm.enable({
-            allowSelfIntersection: false
-          });
-        });
-      })
-      .catch(err => {
-        alert('Не вдалося завантажити дані DeepState. Перевір посилання на GeoJSON.');
-        console.error(err);
+      // Робимо шар редагованим
+      occupiedLayer.pm.enable({
+        allowSelfIntersection: false
       });
 
-    // Кнопка увімкнення/вимкнення редагування
-    function toggleEdit() {
-      isEditing = !isEditing;
-      
-      if (isEditing) {
-        map.pm.enableGlobalEditMode();
-        alert('Редагування увімкнено.\nТягни вершини, щоб змінити форму.');
-      } else {
-        map.pm.disableGlobalEditMode();
-        alert('Редагування вимкнено.');
-      }
-    }
+      console.log('Карта завантажена успішно');
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Помилка завантаження даних.\nПеревір консоль (F12).');
+    });
 
-    // Експорт відредагованого GeoJSON
-    function exportGeoJSON() {
-      if (!occupiedLayer) {
-        alert('Шар ще не завантажився');
-        return;
-      }
-
-      const geojson = occupiedLayer.toGeoJSON();
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojson, null, 2));
-      
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", "ukraine_occupied_edited.geojson");
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
+  // Завантаження відредагованого GeoJSON
+  function downloadGeoJSON() {
+    if (!occupiedLayer) {
+      alert('Шар ще не завантажився');
+      return;
     }
-  </script>
+    const geojson = occupiedLayer.toGeoJSON();
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'ukraine_occupied_edited.geojson';
+    link.click();
+  }
+</script>
 </body>
 </html>
