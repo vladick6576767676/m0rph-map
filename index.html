@@ -46,7 +46,7 @@
     .stats { font-size: 12.5px; line-height: 1.8; }
     .stats b { font-variant-numeric: tabular-nums; }
     .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
-    #status { font-size: 12px; color: #9ca3af; line-height: 1.45; margin-top: 4px; }
+    #status { font-size: 12px; color: #9ca3af; line-height: 1.45; margin-top: 4px; word-break: break-word; }
     .btn-green { background: #10b981; border-color: #10b981; }
     .btn-green:hover { background: #059669; }
     .btn-clear { background: rgba(239,68,68,.15); color: #f87171; border-color: rgba(239,68,68,.3); }
@@ -137,6 +137,15 @@
 <div class="coords" id="coords">—</div>
 
 <script>
+  const $ = id => document.getElementById(id);
+  const setStatus = html => $('status').innerHTML = html;
+  window.addEventListener('error', e => setStatus('<span style="color:#f87171">Помилка: ' + e.message + '</span>'));
+  window.addEventListener('unhandledrejection', e => setStatus('<span style="color:#f87171">Помилка: ' + (e.reason && e.reason.message || e.reason) + '</span>'));
+
+  if (typeof L === 'undefined' || typeof turf === 'undefined') {
+    setStatus('<span style="color:#f87171">Не завантажились бібліотеки Leaflet/Turf. Перевір інтернет.</span>');
+  }
+
   // ===== Карта =====
   const map = L.map('map', { center: [47.5, 35.0], zoom: 8, zoomControl: false, doubleClickZoom: false });
   L.control.zoom({ position: 'topright' }).addTo(map);
@@ -148,7 +157,6 @@
     map.getPane(n + 'Pane').style.pointerEvents = 'none';
   }
   const redRenderer = L.canvas({ pane: 'redPane', padding: 0.3 });
-  const bandRenderer = L.canvas({ pane: 'bandPane', padding: 0.3 });
 
   // ===== Підложки =====
   const layers = {
@@ -166,11 +174,9 @@
     currentBase = layers[type].addTo(map);
     currentBase.bringToBack();
     document.querySelectorAll('.btn-layer').forEach(b => b.classList.remove('active'));
-    document.getElementById('btn-' + type).classList.add('active');
+    $('btn-' + type).classList.add('active');
   }
 
-  const $ = id => document.getElementById(id);
-  const setStatus = html => $('status').innerHTML = html;
   const fmt = n => Math.round(n).toLocaleString('uk-UA');
   const fmtSigned = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
   const fmtBand = km => km < 1 ? Math.round(km * 1000) + ' м' : (+km.toFixed(1)) + ' км';
@@ -181,9 +187,81 @@
   let state = { parts: [], arrows: [] };
   let baseParts = [], baseArea = 0;
   let brushKm = 3, bandKm = 0.5, fillOpacity = 0.5;
-
-  let redLayer = null, bandLayer = null;
+  let redLayer = null;
   const arrowsLayer = L.layerGroup().addTo(map);
+
+  function kmToPx(km, lat) {
+    const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
+    return km * 1000 / mpp;
+  }
+
+  // ===== Сіра зона: швидкий canvas-шар (обводка контуру мінус внутрішня частина) =====
+  const BandLayer = L.Layer.extend({
+    onAdd(m) {
+      this._canvas = L.DomUtil.create('canvas');
+      this._canvas.style.position = 'absolute';
+      this._canvas.style.pointerEvents = 'none';
+      this._canvas.style.opacity = 0.6;
+      m.getPane('bandPane').appendChild(this._canvas);
+      m.on('move', this.schedule, this);
+      m.on('zoomend resize', this.redraw, this);
+      m.on('zoomstart', () => { this._canvas.style.visibility = 'hidden'; });
+      this.redraw();
+    },
+    onRemove(m) {
+      L.DomUtil.remove(this._canvas);
+      m.off('move', this.schedule, this);
+      m.off('zoomend resize', this.redraw, this);
+    },
+    schedule() {
+      if (this._raf) return;
+      this._raf = requestAnimationFrame(() => { this._raf = null; this.redraw(); });
+    },
+    redraw() {
+      if (!this._map) return;
+      const m = this._map, size = m.getSize();
+      const c = this._canvas;
+      c.style.visibility = 'visible';
+      c.width = size.x * 2; c.height = size.y * 2;
+      L.DomUtil.setPosition(c, m.containerPointToLayerPoint([-size.x / 2, -size.y / 2]));
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, c.width, c.height);
+      if (!bandKm || !state.parts.length) return;
+
+      const ox = size.x / 2, oy = size.y / 2;
+      const bandPx = 2 * kmToPx(bandKm, m.getCenter().lat);
+      const view = m.getBounds().pad(0.6);
+      const vb = [view.getWest(), view.getSouth(), view.getEast(), view.getNorth()];
+
+      ctx.beginPath();
+      let any = false;
+      for (const p of state.parts) {
+        if (!bboxOverlap(p.bb, vb)) continue;
+        for (const ring of p.f.geometry.coordinates) {
+          let lx = null, ly = null, first = true;
+          for (let i = 0; i < ring.length; i++) {
+            const pt = m.latLngToContainerPoint([ring[i][1], ring[i][0]]);
+            const x = pt.x + ox, y = pt.y + oy;
+            if (!first && Math.abs(x - lx) < 1 && Math.abs(y - ly) < 1 && i < ring.length - 1) continue;
+            if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+            lx = x; ly = y;
+          }
+          ctx.closePath();
+          any = true;
+        }
+      }
+      if (!any) return;
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = bandPx;
+      ctx.strokeStyle = BAND;
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = '#000';
+      ctx.fill('evenodd');
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  });
+  const bandLayer = new BandLayer().addTo(map);
 
   // ===== Робота з частинами =====
   function toPolys(f) {
@@ -193,7 +271,7 @@
     return [];
   }
   function makePart(f) {
-    return { f, bb: turf.bbox(f), area: turf.area(f) / 1e6, band: null, bandKm: null };
+    return { f, bb: turf.bbox(f), area: turf.area(f) / 1e6 };
   }
   function bboxOverlap(a, b) {
     return !(a[2] < b[0] || b[2] < a[0] || a[3] < b[1] || b[3] < a[1]);
@@ -201,57 +279,18 @@
   function intersects(a, b) {
     try { return turf.booleanIntersects(a, b); } catch (e) { return true; }
   }
-  function makeBand(f) {
-    try {
-      const buf = turf.buffer(f, bandKm, { units: 'kilometers', steps: 8 });
-      return turf.difference(buf, f);
-    } catch (e) { console.warn(e); return null; }
-  }
-  function buildBand(p) {
-    p.band = bandKm > 0 ? makeBand(p.f) : null;
-    p.bandKm = bandKm;
-  }
 
-  // ===== Малювання шарів =====
   function renderRed() {
     if (redLayer) map.removeLayer(redLayer);
-    const fc = turf.featureCollection(state.parts.map(p => p.f));
-    redLayer = L.geoJSON(fc, {
+    redLayer = L.geoJSON(turf.featureCollection(state.parts.map(p => p.f)), {
       renderer: redRenderer, interactive: false,
       style: { color: RED, weight: 1.5, fillColor: RED, fillOpacity }
     });
     if ($('chk-red').checked) redLayer.addTo(map);
-
     const total = state.parts.reduce((s, p) => s + p.area, 0);
     $('st-total').textContent = fmt(total);
     $('st-delta').textContent = fmtSigned(total - baseArea);
     $('st-arrows').textContent = state.arrows.length;
-  }
-
-  function renderBands() {
-    if (bandLayer) map.removeLayer(bandLayer);
-    const fs = state.parts.filter(p => p.band).map(p => p.band);
-    bandLayer = L.geoJSON(turf.featureCollection(fs), {
-      renderer: bandRenderer, interactive: false,
-      style: { stroke: false, fillColor: BAND, fillOpacity: 0.6 }
-    });
-    if ($('chk-band').checked) bandLayer.addTo(map);
-  }
-
-  let bandToken = 0;
-  async function ensureBands() {
-    const tok = ++bandToken;
-    const list = state.parts.filter(p => p.bandKm !== bandKm);
-    if (!list.length) { renderBands(); return; }
-    for (let i = 0; i < list.length; i++) {
-      if (tok !== bandToken) return;
-      if (i % 4 === 0) {
-        setStatus('Будую сіру зону: ' + (i + 1) + ' / ' + list.length);
-        await new Promise(r => setTimeout(r, 0));
-      }
-      buildBand(list[i]);
-    }
-    if (tok === bandToken) { renderBands(); setStatus('Готово'); }
   }
 
   function renderArrows() {
@@ -259,7 +298,6 @@
     state.arrows.forEach(coords => {
       const pts = coords.map(c => L.latLng(c[1], c[0]));
       L.polyline(pts, { pane: 'arrowsPane', color: ORANGE, weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(arrowsLayer);
-
       const last = pts[pts.length - 1];
       let prev = pts[pts.length - 2];
       const pl = map.latLngToLayerPoint(last);
@@ -280,8 +318,9 @@
   function renderAll() {
     renderRed();
     renderArrows();
-    ensureBands();
+    bandLayer.redraw();
   }
+  map.on('zoomend', renderArrows);
 
   // ===== Історія =====
   let hist = [], hi = -1;
@@ -329,12 +368,21 @@
     const coords = dedupe(latlngs);
     if (coords.length < 3) return null;
     coords.push(coords[0]);
+    let poly;
     try {
-      let poly = turf.polygon([coords]);
+      poly = turf.polygon([coords]);
       try { poly = turf.simplify(poly, { tolerance: 0.0003 / Math.pow(2, Math.max(0, map.getZoom() - 9)), highQuality: false }); } catch (e) {}
-      const fixed = turf.buffer(poly, 0, { units: 'kilometers' });
-      return fixed || poly;
     } catch (e) { console.warn(e); return null; }
+    // виправляємо самоперетини
+    try {
+      const pieces = turf.unkinkPolygon(poly).features;
+      if (pieces.length > 1) {
+        let acc = pieces[0];
+        for (let i = 1; i < pieces.length; i++) acc = union(acc, pieces[i]);
+        return acc;
+      }
+    } catch (e) { console.warn(e); }
+    return poly;
   }
 
   function addShape(shape) {
@@ -365,8 +413,7 @@
     const out = [];
     state.parts.forEach(p => {
       if (bboxOverlap(p.bb, sb) && intersects(p.f, shape)) {
-        const r = diff(p.f, shape);
-        toPolys(r).forEach(f => out.push(makePart(f)));
+        toPolys(diff(p.f, shape)).forEach(f => out.push(makePart(f)));
       } else out.push(p);
     });
     state.parts = out;
@@ -378,8 +425,8 @@
     busy = true;
     setStatus('Обчислення…');
     setTimeout(() => {
-      try { doCommit(latlngs, t); }
-      catch (e) { console.error(e); setStatus('<span style="color:#f87171">Помилка обчислення</span>'); }
+      try { doCommit(latlngs, t); setStatus('Готово'); }
+      catch (e) { console.error(e); setStatus('<span style="color:#f87171">Помилка обчислення: ' + e.message + '</span>'); }
       busy = false;
     }, 20);
   }
@@ -391,13 +438,13 @@
         const c = [p.lng, p.lat], l = coords[coords.length - 1];
         if (!l || map.latLngToLayerPoint(L.latLng(l[1], l[0])).distanceTo(map.latLngToLayerPoint(p)) > 4) coords.push(c);
       });
-      if (coords.length < 2) { setStatus(''); return; }
+      if (coords.length < 2) return;
       let line = turf.lineString(coords);
       try { line = turf.simplify(line, { tolerance: 0.004 / Math.pow(2, map.getZoom() - 7), highQuality: true }); } catch (e) {}
       state.arrows = state.arrows.concat([line.geometry.coordinates]);
     } else if (t === 'lasso') {
       const shape = lassoShape(latlngs);
-      if (!shape) { setStatus(''); return; }
+      if (!shape) return;
       addShape(shape);
     } else if (t === 'brush') {
       addShape(brushShape(latlngs));
@@ -408,14 +455,8 @@
         try { return !turf.booleanIntersects(turf.lineString(a), shape); } catch (e) { return true; }
       });
     }
-
-    // Сіра зона для нових/змінених частин рахується одразу — фронт і сіра зона рухаються разом
-    const stale = state.parts.filter(p => p.bandKm !== bandKm);
-    if (stale.length <= 10) stale.forEach(buildBand);
-
     renderAll();
     pushHistory();
-    setStatus('Готово');
   }
 
   // ===== Інструменти =====
@@ -444,10 +485,6 @@
   const cont = map.getContainer();
   let stroking = false, strokePts = [], previewLine = null, closeLine = null, previewFill = null, bandPrev = null, cursorCircle = null, activePointer = null;
 
-  function kmToPx(km, lat) {
-    const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
-    return km * 1000 / mpp;
-  }
   const pxWidth = lat => Math.max(2, 2 * kmToPx(brushKm, lat));
   const toolColor = () => ({ lasso: '#ffffff', brush: RED, arrow: ORANGE, erase: '#ffffff' }[tool]);
 
@@ -457,13 +494,12 @@
     e.preventDefault();
     stroking = true;
     activePointer = e.pointerId;
-    cont.setPointerCapture(e.pointerId);
+    try { cont.setPointerCapture(e.pointerId); } catch (_) {}
     const ll = map.mouseEventToLatLng(e);
     strokePts = [ll];
     const bpx = 2 * kmToPx(bandKm, ll.lat);
 
     if (tool === 'lasso') {
-      // сіра смуга росте разом з обведенням
       if (bandKm > 0) bandPrev = L.polygon(strokePts, { pane: 'bandPane', interactive: false, color: BAND, weight: bpx, opacity: 0.6, fill: false, lineJoin: 'round' }).addTo(map);
       previewFill = L.polygon(strokePts, { pane: 'previewPane', interactive: false, stroke: false, fillColor: RED, fillOpacity: 0.25 }).addTo(map);
       previewLine = L.polyline(strokePts, { pane: 'previewPane', interactive: false, color: '#fff', weight: 2.5, dashArray: '8 7', lineCap: 'butt' }).addTo(map);
@@ -525,8 +561,6 @@
     previewLine = closeLine = previewFill = bandPrev = null;
   }
 
-  map.on('zoomend', renderArrows);
-
   // ===== Налаштування =====
   $('size').addEventListener('input', e => setSize(+e.target.value));
   function setSize(v) {
@@ -534,12 +568,10 @@
     $('size').value = brushKm;
     $('size-val').textContent = brushKm + ' км';
   }
-  let bandTimer = null;
   $('band').addEventListener('input', e => {
     bandKm = +e.target.value;
     $('band-val').textContent = fmtBand(bandKm);
-    clearTimeout(bandTimer);
-    bandTimer = setTimeout(ensureBands, 250);
+    bandLayer.redraw();
   });
   $('opacity').addEventListener('input', e => {
     fillOpacity = +e.target.value;
@@ -550,9 +582,9 @@
   $('chk-labels').addEventListener('change', e => e.target.checked ? labels.addTo(map) : map.removeLayer(labels));
   $('chk-arrows').addEventListener('change', e => e.target.checked ? arrowsLayer.addTo(map) : map.removeLayer(arrowsLayer));
   $('chk-red').addEventListener('change', e => { if (redLayer) e.target.checked ? redLayer.addTo(map) : map.removeLayer(redLayer); });
-  $('chk-band').addEventListener('change', e => { if (bandLayer) e.target.checked ? bandLayer.addTo(map) : map.removeLayer(bandLayer); });
+  $('chk-band').addEventListener('change', e => e.target.checked ? bandLayer.addTo(map) : map.removeLayer(bandLayer));
 
-  // ===== Гарячі клавіші (працюють, але в інтерфейсі не показані) =====
+  // ===== Гарячі клавіші =====
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
     const k = e.key.toLowerCase();
@@ -581,32 +613,50 @@
     return false;
   }
 
-  const url = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20261004.geojson';
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error('Помилка HTTP ' + r.status); return r.json(); })
-    .then(data => {
-      const parts = [];
-      (data.features || []).forEach(f => {
-        if (!f.geometry || !/Polygon/.test(f.geometry.type) || isNotOccupied(f)) return;
-        toPolys(f).forEach(poly => {
-          let g = poly;
-          try { g = turf.simplify(poly, { tolerance: 0.0002, highQuality: false }); } catch (e) {}
-          g = turf.feature(g.geometry);
-          parts.push(makePart(g));
-        });
+  function dateStr(d) {
+    return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  }
+
+  async function loadDeepState() {
+    // пробуємо сьогодні та 7 попередніх днів
+    for (let back = 0; back < 8; back++) {
+      const d = new Date(); d.setDate(d.getDate() - back);
+      const ds = dateStr(d);
+      const url = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_' + ds + '.geojson';
+      setStatus('Завантаження DeepState (' + ds + ')…');
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        const data = await r.json();
+        return { data, ds };
+      } catch (e) { /* пробуємо далі */ }
+    }
+    throw new Error('Не вдалося завантажити файл DeepState ні за одну з останніх 8 днів');
+  }
+
+  loadDeepState().then(({ data, ds }) => {
+    const parts = [];
+    let skipped = 0;
+    (data.features || []).forEach(f => {
+      if (!f.geometry || !/Polygon/.test(f.geometry.type) || isNotOccupied(f)) { skipped++; return; }
+      toPolys(f).forEach(poly => {
+        let g = poly;
+        try { g = turf.simplify(poly, { tolerance: 0.0004, highQuality: false }); } catch (e) {}
+        try { parts.push(makePart(turf.polygon(g.geometry.coordinates.map(r => r.map(c => [c[0], c[1]]))))); } catch (e) {}
       });
-      baseParts = parts;
-      baseArea = parts.reduce((s, p) => s + p.area, 0);
-      state = { parts: baseParts.slice(), arrows: [] };
-      hist = []; hi = -1;
-      pushHistory();
-      renderAll();
-      setStatus('Дані DeepState завантажено<br><small>4 жовтня 2026</small>');
-    })
-    .catch(err => {
-      console.error(err);
-      setStatus('<span style="color:#f87171">Помилка завантаження DeepState</span><br>' + err.message);
     });
+    baseParts = parts;
+    baseArea = parts.reduce((s, p) => s + p.area, 0);
+    state = { parts: baseParts.slice(), arrows: [] };
+    hist = []; hi = -1;
+    pushHistory();
+    renderAll();
+    setStatus('Дані DeepState завантажено<br><small>' + ds.slice(6) + '.' + ds.slice(4, 6) + '.' + ds.slice(0, 4) + ' · полігонів: ' + parts.length + '</small>');
+  }).catch(err => {
+    console.error(err);
+    setStatus('<span style="color:#f87171">Помилка завантаження DeepState</span><br>' + err.message + '<br><small>Можна малювати з нуля або відкрити свій GeoJSON.</small>');
+    pushHistory();
+  });
 
   // ===== Файли =====
   function downloadGeoJSON() {
@@ -630,7 +680,7 @@
         (gj.features || []).forEach(ft => {
           const t = ft.properties && ft.properties.type;
           if (t === 'arrow') next.arrows.push(ft.geometry.coordinates);
-          else if (t === 'occupied') toPolys(ft).forEach(p => next.parts.push(makePart(turf.feature(p.geometry))));
+          else if (t === 'occupied') toPolys(ft).forEach(p => next.parts.push(makePart(turf.polygon(p.geometry.coordinates))));
         });
         state = next; renderAll(); pushHistory();
         setStatus('Файл завантажено');
