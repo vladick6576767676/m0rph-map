@@ -47,6 +47,7 @@
     .stats b { font-variant-numeric: tabular-nums; }
     .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
     #status { font-size: 12px; color: #9ca3af; line-height: 1.45; margin-top: 4px; word-break: break-word; }
+    #status2 { font-size: 11.5px; color: #6b7280; line-height: 1.4; margin-top: 4px; }
     .btn-green { background: #10b981; border-color: #10b981; }
     .btn-green:hover { background: #059669; }
     .btn-clear { background: rgba(239,68,68,.15); color: #f87171; border-color: rgba(239,68,68,.3); }
@@ -105,8 +106,10 @@
     <div class="section-title">Шари</div>
     <label class="chk"><input type="checkbox" id="chk-red" checked> Окупована зона</label>
     <label class="chk"><input type="checkbox" id="chk-band" checked> Сіра зона</label>
+    <label class="chk"><input type="checkbox" id="chk-np" checked> Зменшувати біля н.п.</label>
     <label class="chk"><input type="checkbox" id="chk-arrows" checked> Стрілки</label>
     <label class="chk"><input type="checkbox" id="chk-labels" checked> Підписи міст</label>
+    <div id="status2">Н.п.: ефект від зуму 9</div>
   </div>
 
   <div class="section">
@@ -180,6 +183,7 @@
   const fmt = n => Math.round(n).toLocaleString('uk-UA');
   const fmtSigned = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
   const fmtBand = km => km < 1 ? Math.round(km * 1000) + ' м' : (+km.toFixed(1)) + ' км';
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
   const RED = '#d9342b', BAND = '#d1d5db', ORANGE = '#f97316';
 
@@ -195,7 +199,71 @@
     return km * 1000 / mpp;
   }
 
-  // ===== Сіра зона: швидкий canvas-шар (обводка контуру мінус внутрішня частина) =====
+  // ===== Населені пункти (OSM / Overpass) =====
+  const settlements = new Map();       // id -> { lat, lon, place, pop }
+  const loadedCells = new Set();
+  let loadingNP = false, npCooldown = 0;
+  let npEnabled = true;
+
+  // Частка, на яку звужується сіра зона: 25% (малі) … 50% (великі)
+  function settlementPct(s) {
+    if (s.pop > 0) {
+      const t = clamp((Math.log10(s.pop) - 2.7) / (5 - 2.7), 0, 1);
+      return 0.25 + 0.25 * t;
+    }
+    return ({ city: 0.5, town: 0.4, village: 0.3, hamlet: 0.25 })[s.place] || 0.25;
+  }
+  // Радіус впливу, км: 1.5 … 6
+  function settlementRadiusKm(pct) {
+    return Math.max(1.5 + 4.5 * ((pct - 0.25) / 0.25), bandKm * 3);
+  }
+
+  async function loadSettlements() {
+    if (!npEnabled || map.getZoom() < 9 || loadingNP || Date.now() < npCooldown) return;
+    const b = map.getBounds().pad(0.15);
+    const cells = [];
+    for (let x = Math.floor(b.getWest()); x <= Math.floor(b.getEast()); x++) {
+      for (let y = Math.floor(b.getSouth()); y <= Math.floor(b.getNorth()); y++) {
+        const key = x + ',' + y;
+        if (!loadedCells.has(key)) cells.push({ x, y, key });
+      }
+    }
+    if (!cells.length) return;
+    const batch = cells.slice(0, 4);
+    loadingNP = true;
+    $('status2').textContent = 'Н.п.: завантаження…';
+    const q = '[out:json][timeout:25];(' + batch.map(c =>
+      'node["place"~"^(city|town|village|hamlet)$"](' + c.y + ',' + c.x + ',' + (c.y + 1) + ',' + (c.x + 1) + ');'
+    ).join('') + ');out body;';
+    try {
+      const r = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(q)
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      (data.elements || []).forEach(el => {
+        if (settlements.has(el.id)) return;
+        const t = el.tags || {};
+        settlements.set(el.id, { lat: el.lat, lon: el.lon, place: t.place, pop: parseInt(t.population, 10) || 0 });
+      });
+      batch.forEach(c => loadedCells.add(c.key));
+      $('status2').textContent = 'Н.п. завантажено: ' + settlements.size;
+      bandLayer.redraw(true);
+    } catch (e) {
+      console.warn(e);
+      npCooldown = Date.now() + 30000;
+      $('status2').innerHTML = '<span style="color:#fbbf24">Н.п. недоступні (' + e.message + '), повторю через 30 с</span>';
+    }
+    loadingNP = false;
+    // якщо лишились незавантажені клітинки — продовжуємо
+    if (cells.length > batch.length) setTimeout(loadSettlements, 300);
+  }
+  let npTimer = null;
+  function scheduleNP() { clearTimeout(npTimer); npTimer = setTimeout(loadSettlements, 500); }
+
+  // ===== Сіра зона: швидкий canvas-шар =====
   const BandLayer = L.Layer.extend({
     onAdd(m) {
       this._canvas = L.DomUtil.create('canvas');
@@ -204,20 +272,23 @@
       this._canvas.style.opacity = 0.6;
       m.getPane('bandPane').appendChild(this._canvas);
       m.on('move', this.schedule, this);
-      m.on('zoomend resize', this.redraw, this);
-      m.on('zoomstart', () => { this._canvas.style.visibility = 'hidden'; });
-      this.redraw();
+      m.on('moveend zoomend resize', this._full, this);
+      m.on('zoomstart', this._hide, this);
+      this.redraw(true);
     },
     onRemove(m) {
       L.DomUtil.remove(this._canvas);
       m.off('move', this.schedule, this);
-      m.off('zoomend resize', this.redraw, this);
+      m.off('moveend zoomend resize', this._full, this);
+      m.off('zoomstart', this._hide, this);
     },
+    _hide() { this._canvas.style.visibility = 'hidden'; },
+    _full() { this.redraw(true); },
     schedule() {
       if (this._raf) return;
-      this._raf = requestAnimationFrame(() => { this._raf = null; this.redraw(); });
+      this._raf = requestAnimationFrame(() => { this._raf = null; this.redraw(false); });
     },
-    redraw() {
+    redraw(withSettlements = true) {
       if (!this._map) return;
       const m = this._map, size = m.getSize();
       const c = this._canvas;
@@ -233,32 +304,94 @@
       const view = m.getBounds().pad(0.6);
       const vb = [view.getWest(), view.getSouth(), view.getEast(), view.getNorth()];
 
-      ctx.beginPath();
-      let any = false;
+      // Path2D для кожної частини в екранних координатах
+      const items = [];
       for (const p of state.parts) {
         if (!bboxOverlap(p.bb, vb)) continue;
+        const path = new Path2D();
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const ring of p.f.geometry.coordinates) {
           let lx = null, ly = null, first = true;
           for (let i = 0; i < ring.length; i++) {
             const pt = m.latLngToContainerPoint([ring[i][1], ring[i][0]]);
             const x = pt.x + ox, y = pt.y + oy;
             if (!first && Math.abs(x - lx) < 1 && Math.abs(y - ly) < 1 && i < ring.length - 1) continue;
-            if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+            if (first) { path.moveTo(x, y); first = false; } else path.lineTo(x, y);
             lx = x; ly = y;
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
           }
-          ctx.closePath();
-          any = true;
+          path.closePath();
         }
+        items.push({ path, minX, minY, maxX, maxY });
       }
-      if (!any) return;
+      if (!items.length) return;
+
+      // основна смуга
       ctx.lineJoin = 'round';
       ctx.lineWidth = bandPx;
       ctx.strokeStyle = BAND;
-      ctx.stroke();
+      for (const it of items) ctx.stroke(it.path);
       ctx.globalCompositeOperation = 'destination-out';
       ctx.fillStyle = '#000';
-      ctx.fill('evenodd');
+      for (const it of items) ctx.fill(it.path, 'evenodd');
       ctx.globalCompositeOperation = 'source-over';
+
+      // звуження біля населених пунктів
+      if (!withSettlements || !npEnabled || m.getZoom() < 9 || !settlements.size) return;
+      const sb = m.getBounds().pad(0.2);
+      const list = [];
+      settlements.forEach(s => { if (sb.contains([s.lat, s.lon])) list.push(s); });
+      if (list.length > 400) {
+        list.sort((a, b) => settlementPct(b) - settlementPct(a));
+        list.length = 400;
+      }
+
+      const tmp = document.createElement('canvas');
+      const tctx = tmp.getContext('2d');
+
+      for (const s of list) {
+        const pct = settlementPct(s);
+        const Rpx = kmToPx(settlementRadiusKm(pct), s.lat);
+        const pt = m.latLngToContainerPoint([s.lat, s.lon]);
+        const cx = pt.x + ox, cy = pt.y + oy;
+
+        const near = items.filter(it => !(it.maxX + bandPx < cx - Rpx || it.minX - bandPx > cx + Rpx ||
+                                          it.maxY + bandPx < cy - Rpx || it.minY - bandPx > cy + Rpx));
+        if (!near.length) continue;
+
+        const Rc = Math.min(Rpx, 500);
+        const sc = Rc / Rpx;
+        tmp.width = tmp.height = Math.ceil(2 * Rc);
+        tctx.setTransform(sc, 0, 0, sc, -(cx - Rpx) * sc, -(cy - Rpx) * sc);
+        tctx.lineJoin = 'round';
+        tctx.lineWidth = bandPx * (1 - pct);
+        tctx.strokeStyle = BAND;
+        for (const it of near) tctx.stroke(it.path);
+        tctx.globalCompositeOperation = 'destination-out';
+        tctx.fillStyle = '#000';
+        for (const it of near) tctx.fill(it.path, 'evenodd');
+        tctx.setTransform(1, 0, 0, 1, 0, 0);
+        tctx.globalCompositeOperation = 'destination-in';
+        const g1 = tctx.createRadialGradient(Rc, Rc, 0, Rc, Rc, Rc);
+        g1.addColorStop(0, 'rgba(0,0,0,1)');
+        g1.addColorStop(0.6, 'rgba(0,0,0,1)');
+        g1.addColorStop(1, 'rgba(0,0,0,0)');
+        tctx.fillStyle = g1;
+        tctx.fillRect(0, 0, tmp.width, tmp.height);
+        tctx.globalCompositeOperation = 'source-over';
+
+        // у головному шарі прибираємо стару смугу з тією ж маскою і ставимо звужену
+        ctx.globalCompositeOperation = 'destination-out';
+        const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, Rpx);
+        g2.addColorStop(0, 'rgba(0,0,0,1)');
+        g2.addColorStop(0.6, 'rgba(0,0,0,1)');
+        g2.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g2;
+        ctx.fillRect(cx - Rpx, cy - Rpx, 2 * Rpx, 2 * Rpx);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(tmp, cx - Rpx, cy - Rpx, 2 * Rpx, 2 * Rpx);
+      }
     }
   });
   const bandLayer = new BandLayer().addTo(map);
@@ -318,9 +451,10 @@
   function renderAll() {
     renderRed();
     renderArrows();
-    bandLayer.redraw();
+    bandLayer.redraw(true);
   }
   map.on('zoomend', renderArrows);
+  map.on('moveend zoomend', scheduleNP);
 
   // ===== Історія =====
   let hist = [], hi = -1;
@@ -373,7 +507,6 @@
       poly = turf.polygon([coords]);
       try { poly = turf.simplify(poly, { tolerance: 0.0003 / Math.pow(2, Math.max(0, map.getZoom() - 9)), highQuality: false }); } catch (e) {}
     } catch (e) { console.warn(e); return null; }
-    // виправляємо самоперетини
     try {
       const pieces = turf.unkinkPolygon(poly).features;
       if (pieces.length > 1) {
@@ -571,7 +704,7 @@
   $('band').addEventListener('input', e => {
     bandKm = +e.target.value;
     $('band-val').textContent = fmtBand(bandKm);
-    bandLayer.redraw();
+    bandLayer.redraw(true);
   });
   $('opacity').addEventListener('input', e => {
     fillOpacity = +e.target.value;
@@ -583,6 +716,11 @@
   $('chk-arrows').addEventListener('change', e => e.target.checked ? arrowsLayer.addTo(map) : map.removeLayer(arrowsLayer));
   $('chk-red').addEventListener('change', e => { if (redLayer) e.target.checked ? redLayer.addTo(map) : map.removeLayer(redLayer); });
   $('chk-band').addEventListener('change', e => e.target.checked ? bandLayer.addTo(map) : map.removeLayer(bandLayer));
+  $('chk-np').addEventListener('change', e => {
+    npEnabled = e.target.checked;
+    if (npEnabled) loadSettlements();
+    bandLayer.redraw(true);
+  });
 
   // ===== Гарячі клавіші =====
   document.addEventListener('keydown', e => {
@@ -618,7 +756,6 @@
   }
 
   async function loadDeepState() {
-    // пробуємо сьогодні та 7 попередніх днів
     for (let back = 0; back < 8; back++) {
       const d = new Date(); d.setDate(d.getDate() - back);
       const ds = dateStr(d);
@@ -636,9 +773,8 @@
 
   loadDeepState().then(({ data, ds }) => {
     const parts = [];
-    let skipped = 0;
     (data.features || []).forEach(f => {
-      if (!f.geometry || !/Polygon/.test(f.geometry.type) || isNotOccupied(f)) { skipped++; return; }
+      if (!f.geometry || !/Polygon/.test(f.geometry.type) || isNotOccupied(f)) return;
       toPolys(f).forEach(poly => {
         let g = poly;
         try { g = turf.simplify(poly, { tolerance: 0.0004, highQuality: false }); } catch (e) {}
@@ -652,6 +788,7 @@
     pushHistory();
     renderAll();
     setStatus('Дані DeepState завантажено<br><small>' + ds.slice(6) + '.' + ds.slice(4, 6) + '.' + ds.slice(0, 4) + ' · полігонів: ' + parts.length + '</small>');
+    scheduleNP();
   }).catch(err => {
     console.error(err);
     setStatus('<span style="color:#f87171">Помилка завантаження DeepState</span><br>' + err.message + '<br><small>Можна малювати з нуля або відкрити свій GeoJSON.</small>');
