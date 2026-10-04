@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>m0rph map</title>
+
+    <title>m0rph-map</title>
 
     <style>
         * {
@@ -13,57 +14,426 @@
         body {
             margin: 0;
             font-family: Arial, sans-serif;
-            background: #0d1117;
-            color: white;
-            min-height: 100vh;
+            background: #0b0f0c;
+            color: #ffffff;
+        }
+
+        /* ===== ВЕРХНЄ МЕНЮ ===== */
+
+        header {
+            height: 65px;
+            background: #111711;
+            border-bottom: 1px solid #293329;
+
             display: flex;
             align-items: center;
-            justify-content: center;
+            justify-content: space-between;
+
+            padding: 0 25px;
         }
 
-        .container {
-            text-align: center;
-            padding: 40px;
+        .logo {
+            font-size: 22px;
+            font-weight: bold;
+            color: #8faa83;
         }
 
-        h1 {
-            font-size: 60px;
-            margin: 0 0 15px;
-            color: #58a6ff;
+        nav {
+            display: flex;
+            gap: 10px;
         }
 
-        p {
-            color: #8b949e;
-            font-size: 20px;
+        nav button {
+            background: transparent;
+            color: #aaa;
+            border: 1px solid transparent;
+
+            padding: 9px 15px;
+            border-radius: 6px;
+
+            cursor: pointer;
+            font-size: 14px;
         }
 
-        button {
-            margin-top: 20px;
-            padding: 14px 30px;
-            border: none;
-            border-radius: 8px;
-            background: #238636;
+        nav button:hover {
+            background: #1b241b;
             color: white;
-            font-size: 18px;
+            border-color: #334033;
+        }
+
+        /* ===== ОСНОВНА ЧАСТИНА ===== */
+
+        main {
+            padding: 25px;
+        }
+
+        .title {
+            margin-bottom: 20px;
+        }
+
+        .title h1 {
+            margin: 0;
+            font-size: 30px;
+        }
+
+        .title p {
+            margin-top: 7px;
+            color: #899189;
+        }
+
+        /* ===== КАРТА ===== */
+
+        .map-container {
+            position: relative;
+
+            width: 100%;
+            height: 650px;
+
+            background:
+                linear-gradient(
+                    rgba(40, 55, 40, 0.85),
+                    rgba(20, 30, 20, 0.9)
+                ),
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 49px,
+                    rgba(255,255,255,0.03) 50px
+                ),
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 49px,
+                    rgba(255,255,255,0.03) 50px
+                );
+
+            border: 1px solid #344034;
+            border-radius: 10px;
+
+            overflow: hidden;
+        }
+
+        /* ===== ПАНЕЛЬ КАРТИ ===== */
+
+        .map-panel {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+
+            background: rgba(12, 17, 12, 0.92);
+
+            border: 1px solid #3a463a;
+            border-radius: 8px;
+
+            padding: 10px;
+        }
+
+        .map-panel button {
+            width: 40px;
+            height: 40px;
+
+            margin: 2px;
+
+            background: #202a20;
+            color: white;
+
+            border: 1px solid #394539;
+            border-radius: 5px;
+
+            font-size: 20px;
             cursor: pointer;
         }
 
-        button:hover {
-            background: #2ea043;
+        .map-panel button:hover {
+            background: #334333;
+        }
+
+        /* ===== МАРКЕРИ ===== */
+
+        .marker {
+            position: absolute;
+
+            width: 18px;
+            height: 18px;
+
+            background: #b5c7a7;
+            border: 3px solid #172017;
+
+            border-radius: 50%;
+
+            cursor: pointer;
+
+            transition: 0.2s;
+        }
+
+        .marker:hover {
+            transform: scale(1.4);
+            background: #ffffff;
+        }
+
+        .marker-name {
+            position: absolute;
+
+            margin-top: 20px;
+            margin-left: -20px;
+
+            white-space: nowrap;
+
+            color: white;
+            font-size: 13px;
+
+            text-shadow: 0 2px 4px black;
+        }
+
+        /* ===== ІНФОРМАЦІЙНА ПАНЕЛЬ ===== */
+
+        .info {
+            position: absolute;
+
+            right: 15px;
+            top: 15px;
+
+            width: 260px;
+
+            background: rgba(12, 17, 12, 0.95);
+
+            border: 1px solid #3a463a;
+            border-radius: 8px;
+
+            padding: 18px;
+
+            display: none;
+        }
+
+        .info h2 {
+            margin-top: 0;
+            font-size: 20px;
+        }
+
+        .info p {
+            color: #a3aaa3;
+            line-height: 1.5;
+        }
+
+        /* ===== НИЖНЯ ПАНЕЛЬ ===== */
+
+        footer {
+            margin-top: 20px;
+
+            padding: 15px;
+
+            color: #687068;
+            text-align: center;
+
+            border-top: 1px solid #222a22;
+        }
+
+        /* ===== ТЕЛЕФОН ===== */
+
+        @media (max-width: 700px) {
+
+            header {
+                padding: 0 12px;
+            }
+
+            nav button {
+                padding: 7px;
+            }
+
+            main {
+                padding: 12px;
+            }
+
+            .map-container {
+                height: 500px;
+            }
+
+            .info {
+                width: 200px;
+            }
         }
     </style>
 </head>
 
 <body>
 
-    <div class="container">
-        <h1>m0rph War map</h1>
-        <p>Добро пожаловать на мой сайт 👋</p>
+    <!-- ВЕРХНЄ МЕНЮ -->
 
-        <button onclick="alert('Привет!')">
-            сальцо жырный
-        </button>
-    </div>
+    <header>
+
+        <div class="logo">
+            m0rph-map
+        </div>
+
+        <nav>
+            <button onclick="showAbout()">Про карту</button>
+            <button onclick="resetMap()">Скинути</button>
+        </nav>
+
+    </header>
+
+
+    <!-- ОСНОВНИЙ КОНТЕНТ -->
+
+    <main>
+
+        <div class="title">
+
+            <h1>Карта</h1>
+
+            <p>
+                Інтерактивна карта m0rph-map
+            </p>
+
+        </div>
+
+
+        <!-- КАРТА -->
+
+        <div class="map-container" id="map">
+
+
+            <!-- КНОПКИ -->
+
+            <div class="map-panel">
+
+                <button onclick="zoomIn()">+</button>
+
+                <button onclick="zoomOut()">−</button>
+
+            </div>
+
+
+            <!-- МАРКЕР 1 -->
+
+            <div
+                class="marker"
+                style="left: 35%; top: 45%;"
+                onclick="showLocation('Центральна точка', 'Основна точка карти.')"
+            >
+                <div class="marker-name">
+                    Центр
+                </div>
+            </div>
+
+
+            <!-- МАРКЕР 2 -->
+
+            <div
+                class="marker"
+                style="left: 60%; top: 30%;"
+                onclick="showLocation('Північна точка', 'Інформація про цю локацію.')"
+            >
+                <div class="marker-name">
+                    Північ
+                </div>
+            </div>
+
+
+            <!-- МАРКЕР 3 -->
+
+            <div
+                class="marker"
+                style="left: 70%; top: 65%;"
+                onclick="showLocation('Південна точка', 'Інформація про цю локацію.')"
+            >
+                <div class="marker-name">
+                    Південь
+                </div>
+            </div>
+
+
+            <!-- ІНФОРМАЦІЯ -->
+
+            <div class="info" id="info">
+
+                <h2 id="info-title">
+                    Назва
+                </h2>
+
+                <p id="info-text">
+                    Інформація.
+                </p>
+
+            </div>
+
+        </div>
+
+    </main>
+
+
+    <footer>
+
+        m0rph-map © 2026
+
+    </footer>
+
+
+    <!-- JAVASCRIPT -->
+
+    <script>
+
+        let zoom = 1;
+
+
+        function showLocation(title, text) {
+
+            document.getElementById("info").style.display = "block";
+
+            document.getElementById("info-title").innerText = title;
+
+            document.getElementById("info-text").innerText = text;
+
+        }
+
+
+        function showAbout() {
+
+            showLocation(
+                "m0rph-map",
+                "Інтерактивна карта. Тут можна розміщувати власні карти, локації та маркери."
+            );
+
+        }
+
+
+        function zoomIn() {
+
+            zoom += 0.1;
+
+            document.getElementById("map").style.transform =
+                "scale(" + zoom + ")";
+
+        }
+
+
+        function zoomOut() {
+
+            if (zoom > 0.5) {
+
+                zoom -= 0.1;
+
+                document.getElementById("map").style.transform =
+                    "scale(" + zoom + ")";
+
+            }
+
+        }
+
+
+        function resetMap() {
+
+            zoom = 1;
+
+            document.getElementById("map").style.transform =
+                "scale(1)";
+
+            document.getElementById("info").style.display =
+                "none";
+
+        }
+
+    </script>
 
 </body>
 </html>
