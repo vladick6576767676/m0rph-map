@@ -3,13 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Карта війни в Україні</title>
+  <title>Карта війни — просування</title>
 
-  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- Geoman (редагування) -->
+  <!-- Geoman -->
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css" />
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"></script>
 
@@ -33,8 +32,8 @@
       top: 14px;
       left: 14px;
       width: 270px;
-      background: rgba(17, 20, 28, 0.94);
-      backdrop-filter: blur(10px);
+      background: rgba(17, 20, 28, 0.95);
+      backdrop-filter: blur(12px);
       border: 1px solid rgba(255,255,255,0.08);
       border-radius: 14px;
       padding: 16px;
@@ -84,33 +83,31 @@
       border-color: #2563eb;
     }
 
-    .btn-edit { background: #3b82f6; }
-    .btn-edit:hover { background: #2563eb; }
-    .btn-download { background: #10b981; }
-    .btn-download:hover { background: #059669; }
-    .btn-reset {
+    .btn-draw {
+      background: #dc2626;
+    }
+    .btn-draw:hover { background: #b91c1c; }
+
+    .btn-arrow {
+      background: #ea580c;
+    }
+    .btn-arrow:hover { background: #c2410c; }
+
+    .btn-clear {
       background: rgba(239,68,68,0.15);
       color: #f87171;
       border: 1px solid rgba(239,68,68,0.3);
+    }
+
+    .btn-download {
+      background: #10b981;
     }
 
     #status {
       font-size: 12px;
       color: #9ca3af;
       line-height: 1.45;
-      margin-top: 6px;
-    }
-
-    /* Підписи населених пунктів */
-    .place-label {
-      background: transparent !important;
-      border: none !important;
-      box-shadow: none !important;
-      color: #fff;
-      font-weight: 600;
-      font-size: 11px;
-      text-shadow: 0 0 4px #000, 0 0 6px #000, 1px 1px 2px #000;
-      white-space: nowrap;
+      margin-top: 8px;
     }
   </style>
 </head>
@@ -129,13 +126,14 @@
   </div>
 
   <div class="section">
-    <div class="section-title">Дії</div>
-    <button class="btn-edit" onclick="toggleEdit()">Редагувати контур</button>
+    <div class="section-title">Малювання просування</div>
+    <button class="btn-arrow" onclick="drawArrow()">➤ Малювати стрілку</button>
+    <button class="btn-draw" onclick="drawPolygon()">▮ Малювати зону</button>
+    <button class="btn-clear" onclick="clearDrawings()">Очистити малюнки</button>
     <button class="btn-download" onclick="downloadGeoJSON()">Завантажити GeoJSON</button>
-    <button class="btn-reset" onclick="location.reload()">Скинути</button>
   </div>
 
-  <div id="status">Завантаження даних...</div>
+  <div id="status">Завантаження даних DeepState...</div>
 </div>
 
 <script>
@@ -164,7 +162,7 @@
     })
   };
 
-  // Підписи населених пунктів (шар від Esri)
+  // Підписи міст і сіл
   const labels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 18,
     opacity: 0.9
@@ -172,14 +170,13 @@
 
   let currentBase = layers.sat;
   currentBase.addTo(map);
-  labels.addTo(map);   // підписи міст і сіл
+  labels.addTo(map);
 
   function setBase(type) {
     map.removeLayer(currentBase);
     currentBase = layers[type];
     currentBase.addTo(map);
 
-    // Підписи завжди зверху
     if (map.hasLayer(labels)) map.removeLayer(labels);
     labels.addTo(map);
 
@@ -187,7 +184,10 @@
     document.getElementById('btn-' + type).classList.add('active');
   }
 
-  // ===== Geoman =====
+  // ===== Група для малюнків користувача =====
+  const drawings = L.featureGroup().addTo(map);
+
+  // ===== Geoman налаштування =====
   map.pm.addControls({
     position: 'topleft',
     drawMarker: false,
@@ -196,26 +196,81 @@
     drawRectangle: false,
     drawCircle: false,
     drawText: false,
-    drawPolygon: true,
+    drawPolygon: false,   // вимикаємо стандартні
     editMode: true,
-    dragMode: true,
+    dragMode: false,
     removalMode: true,
     cutPolygon: false
   });
 
-  map.pm.setGlobalOptions({
-    pathOptions: {
-      color: '#ef4444',
-      fillColor: '#ef4444',
-      fillOpacity: 0.38,
-      weight: 2
+  // Стиль стрілок (просування)
+  const arrowStyle = {
+    color: '#f97316',
+    weight: 4,
+    opacity: 0.95
+  };
+
+  // Стиль нових зон
+  const zoneStyle = {
+    color: '#ef4444',
+    weight: 2,
+    fillColor: '#ef4444',
+    fillOpacity: 0.35
+  };
+
+  // ===== Функції малювання =====
+  function drawArrow() {
+    map.pm.enableDraw('Line', {
+      snappable: true,
+      snapDistance: 20,
+      finishOn: 'dblclick',
+      pathOptions: arrowStyle
+    });
+    document.getElementById('status').innerHTML = 
+      '<span style="color:#fb923c">Малюй стрілку просування</span><br>Подвійний клік — закінчити';
+  }
+
+  function drawPolygon() {
+    map.pm.enableDraw('Polygon', {
+      snappable: true,
+      snapDistance: 20,
+      pathOptions: zoneStyle
+    });
+    document.getElementById('status').innerHTML = 
+      '<span style="color:#f87171">Малюй нову зону</span><br>Подвійний клік — закінчити';
+  }
+
+  // Коли користувач закінчив малювати
+  map.on('pm:create', (e) => {
+    const layer = e.layer;
+
+    // Додаємо в групу малюнків
+    drawings.addLayer(layer);
+
+    // Робимо стрілку з наконечником (візуально)
+    if (e.shape === 'Line') {
+      layer.setStyle(arrowStyle);
     }
+
+    // Дозволяємо можливість видаляти
+    layer.on('click', () => {
+      if (confirm('Видалити цей елемент?')) {
+        drawings.removeLayer(layer);
+      }
+    });
+
+    document.getElementById('status').innerHTML = 'Елемент додано';
   });
 
-  let occupiedLayer = null;
-  let isEditing = false;
+  // ===== Очистити всі малюнки =====
+  function clearDrawings() {
+    if (confirm('Видалити всі намальовані просування?')) {
+      drawings.clearLayers();
+      document.getElementById('status').innerHTML = 'Малюнки очищено';
+    }
+  }
 
-  // ===== Завантаження DeepState =====
+  // ===== Завантаження DeepState (не редагований) =====
   const url = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20261004.geojson';
 
   fetch(url)
@@ -224,13 +279,15 @@
       return r.json();
     })
     .then(data => {
-      occupiedLayer = L.geoJSON(data, {
+      L.geoJSON(data, {
         style: {
           color: '#ef4444',
-          weight: 1.8,
+          weight: 1.5,
           fillColor: '#ef4444',
-          fillOpacity: 0.38
-        }
+          fillOpacity: 0.32,
+          interactive: false   // не можна чіпати
+        },
+        pmIgnore: true         // Geoman ігнорує цей шар
       }).addTo(map);
 
       document.getElementById('status').innerHTML = 
@@ -242,37 +299,13 @@
         '<span style="color:#f87171">Помилка завантаження</span><br>' + err.message;
     });
 
-  // ===== Редагування =====
-  function toggleEdit() {
-    if (!occupiedLayer) {
-      alert('Спочатку дочекайся завантаження даних');
-      return;
-    }
-
-    isEditing = !isEditing;
-
-    if (isEditing) {
-      map.pm.enableGlobalEditMode();
-      document.getElementById('status').innerHTML = 
-        '<span style="color:#60a5fa">Редагування увімкнено</span><br>Тягни вершини червоного контуру';
-    } else {
-      map.pm.disableGlobalEditMode();
-      document.getElementById('status').innerHTML = 'Редагування вимкнено';
-    }
-  }
-
   // ===== Експорт =====
   function downloadGeoJSON() {
-    if (!occupiedLayer) {
-      alert('Дані ще не завантажилися');
-      return;
-    }
-
-    const geojson = occupiedLayer.toGeoJSON();
+    const geojson = drawings.toGeoJSON();
     const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'ukraine_occupied_edited.geojson';
+    a.download = 'ukraine_advances.geojson';
     a.click();
   }
 </script>
