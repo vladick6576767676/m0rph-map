@@ -8,10 +8,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- Geoman -->
-  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css" />
-  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"></script>
-
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -20,94 +16,50 @@
       color: #e5e7eb;
       overflow: hidden;
     }
-
-    #map {
-      height: 100vh;
-      width: 100%;
-      background: #0f1115;
-    }
+    #map { height: 100vh; width: 100%; background: #0f1115; }
+    #map.drawing, #map.drawing .leaflet-interactive { cursor: crosshair !important; }
 
     .sidebar {
-      position: absolute;
-      top: 14px;
-      left: 14px;
-      width: 270px;
+      position: absolute; top: 14px; left: 14px; width: 270px;
       background: rgba(17, 20, 28, 0.95);
       backdrop-filter: blur(12px);
       border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 14px;
-      padding: 16px;
-      z-index: 1000;
+      border-radius: 14px; padding: 16px; z-index: 1000;
       box-shadow: 0 8px 30px rgba(0,0,0,0.5);
     }
-
-    .sidebar h2 {
-      font-size: 15px;
-      margin-bottom: 14px;
-      font-weight: 600;
-    }
-
-    .section {
-      margin-bottom: 16px;
-    }
-
+    .sidebar h2 { font-size: 15px; margin-bottom: 14px; font-weight: 600; }
+    .section { margin-bottom: 16px; }
     .section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      color: #9ca3af;
-      margin-bottom: 7px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+      color: #9ca3af; margin-bottom: 7px;
     }
-
     button {
-      display: block;
-      width: 100%;
-      padding: 9px 12px;
-      margin-bottom: 6px;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      cursor: pointer;
-      color: white;
-      text-align: left;
-      transition: 0.15s;
+      display: block; width: 100%; padding: 9px 12px; margin-bottom: 6px;
+      border: none; border-radius: 8px; font-size: 13px; cursor: pointer;
+      color: white; text-align: left; transition: 0.15s;
     }
-
-    .btn-layer {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.08);
-    }
+    .btn-layer { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
     .btn-layer:hover { background: rgba(255,255,255,0.12); }
-    .btn-layer.active {
-      background: #2563eb;
-      border-color: #2563eb;
-    }
-
-    .btn-draw {
-      background: #dc2626;
-    }
+    .btn-layer.active { background: #2563eb; border-color: #2563eb; }
+    .btn-draw { background: #dc2626; }
     .btn-draw:hover { background: #b91c1c; }
-
-    .btn-arrow {
-      background: #ea580c;
-    }
+    .btn-arrow { background: #ea580c; }
     .btn-arrow:hover { background: #c2410c; }
-
+    button.on { outline: 2px solid #fff; }
     .btn-clear {
-      background: rgba(239,68,68,0.15);
-      color: #f87171;
+      background: rgba(239,68,68,0.15); color: #f87171;
       border: 1px solid rgba(239,68,68,0.3);
     }
+    .btn-download { background: #10b981; }
+    #status { font-size: 12px; color: #9ca3af; line-height: 1.45; margin-top: 8px; }
 
-    .btn-download {
-      background: #10b981;
-    }
-
-    #status {
-      font-size: 12px;
-      color: #9ca3af;
-      line-height: 1.45;
-      margin-top: 8px;
+    .arrow-head { background: none; border: none; }
+    .arrow-head div {
+      width: 0; height: 0;
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 18px solid #f97316;
+      transform-origin: 50% 50%;
     }
   </style>
 </head>
@@ -127,8 +79,8 @@
 
   <div class="section">
     <div class="section-title">Малювання просування</div>
-    <button class="btn-arrow" onclick="drawArrow()">➤ Малювати стрілку</button>
-    <button class="btn-draw" onclick="drawPolygon()">▮ Малювати зону</button>
+    <button class="btn-arrow" id="btn-arrow" onclick="startDraw('arrow')">➤ Малювати стрілку</button>
+    <button class="btn-draw" id="btn-zone" onclick="startDraw('zone')">▮ Малювати зону</button>
     <button class="btn-clear" onclick="clearDrawings()">Очистити малюнки</button>
     <button class="btn-download" onclick="downloadGeoJSON()">Завантажити GeoJSON</button>
   </div>
@@ -138,176 +90,78 @@
 
 <script>
   // ===== Карта =====
-  const map = L.map('map', {
-    center: [48.45, 37.6],
-    zoom: 7,
-    zoomControl: false
-  });
-
+  const map = L.map('map', { center: [48.45, 37.6], zoom: 7, zoomControl: false });
   L.control.zoom({ position: 'topright' }).addTo(map);
 
   // ===== Підложки =====
   const layers = {
-    sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 18,
-      attribution: 'Esri'
-    }),
-    streets: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: 'OSM'
-    }),
-    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 18,
-      attribution: 'Carto'
-    })
+    sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Esri' }),
+    streets: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: 'OSM' }),
+    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18, attribution: 'Carto' })
   };
 
-  // Підписи міст і сіл
+  map.createPane('labelsPane');
+  map.getPane('labelsPane').style.zIndex = 650;
+  map.getPane('labelsPane').style.pointerEvents = 'none';
+
   const labels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 18,
-    opacity: 0.9
-  });
+    maxZoom: 18, opacity: 0.9, pane: 'labelsPane'
+  }).addTo(map);
 
   let currentBase = layers.sat;
   currentBase.addTo(map);
-  labels.addTo(map);
 
   function setBase(type) {
     map.removeLayer(currentBase);
     currentBase = layers[type];
     currentBase.addTo(map);
-
-    if (map.hasLayer(labels)) map.removeLayer(labels);
-    labels.addTo(map);
-
+    currentBase.bringToBack();
     document.querySelectorAll('.btn-layer').forEach(b => b.classList.remove('active'));
     document.getElementById('btn-' + type).classList.add('active');
   }
 
-  // ===== Група для малюнків користувача =====
+  // ===== Стилі =====
+  const arrowStyle = { color: '#f97316', weight: 4, opacity: 0.95 };
+  const zoneStyle  = { color: '#ef4444', weight: 2, fillColor: '#ef4444', fillOpacity: 0.35 };
+
+  // ===== Намальовані елементи (тільки видалення, без перетягування) =====
   const drawings = L.featureGroup().addTo(map);
+  const items = []; // { type, group, line }
 
-  // ===== Geoman налаштування =====
-  map.pm.addControls({
-    position: 'topleft',
-    drawMarker: false,
-    drawCircleMarker: false,
-    drawPolyline: false,
-    drawRectangle: false,
-    drawCircle: false,
-    drawText: false,
-    drawPolygon: false,   // вимикаємо стандартні
-    editMode: true,
-    dragMode: false,
-    removalMode: true,
-    cutPolygon: false
-  });
+  const statusEl = document.getElementById('status');
+  const setStatus = (html) => statusEl.innerHTML = html;
 
-  // Стиль стрілок (просування)
-  const arrowStyle = {
-    color: '#f97316',
-    weight: 4,
-    opacity: 0.95
-  };
+  // ===== Стан малювання =====
+  let mode = null;        // 'arrow' | 'zone' | null
+  let points = [];
+  let preview = null;     // тимчасова фігура
+  let rubber = null;      // лінія до курсора
 
-  // Стиль нових зон
-  const zoneStyle = {
-    color: '#ef4444',
-    weight: 2,
-    fillColor: '#ef4444',
-    fillOpacity: 0.35
-  };
+  function startDraw(type) {
+    cancelDraw();
+    mode = type;
+    points = [];
+    map.doubleClickZoom.disable();
+    document.getElementById('map').classList.add('drawing');
+    document.getElementById(type === 'arrow' ? 'btn-arrow' : 'btn-zone').classList.add('on');
 
-  // ===== Функції малювання =====
-  function drawArrow() {
-    map.pm.enableDraw('Line', {
-      snappable: true,
-      snapDistance: 20,
-      finishOn: 'dblclick',
-      pathOptions: arrowStyle
-    });
-    document.getElementById('status').innerHTML = 
-      '<span style="color:#fb923c">Малюй стрілку просування</span><br>Подвійний клік — закінчити';
+    setStatus(type === 'arrow'
+      ? '<span style="color:#fb923c">Стрілка:</span> клікай по карті, подвійний клік — завершити.<br><small>Backspace — скасувати точку, Esc — відміна</small>'
+      : '<span style="color:#f87171">Зона:</span> клікай по карті, подвійний клік — завершити.<br><small>Backspace — скасувати точку, Esc — відміна</small>');
   }
 
-  function drawPolygon() {
-    map.pm.enableDraw('Polygon', {
-      snappable: true,
-      snapDistance: 20,
-      pathOptions: zoneStyle
-    });
-    document.getElementById('status').innerHTML = 
-      '<span style="color:#f87171">Малюй нову зону</span><br>Подвійний клік — закінчити';
+  function cancelDraw() {
+    if (preview) { map.removeLayer(preview); preview = null; }
+    if (rubber) { map.removeLayer(rubber); rubber = null; }
+    points = [];
+    mode = null;
+    map.doubleClickZoom.enable();
+    document.getElementById('map').classList.remove('drawing');
+    document.querySelectorAll('#btn-arrow, #btn-zone').forEach(b => b.classList.remove('on'));
   }
 
-  // Коли користувач закінчив малювати
-  map.on('pm:create', (e) => {
-    const layer = e.layer;
-
-    // Додаємо в групу малюнків
-    drawings.addLayer(layer);
-
-    // Робимо стрілку з наконечником (візуально)
-    if (e.shape === 'Line') {
-      layer.setStyle(arrowStyle);
-    }
-
-    // Дозволяємо можливість видаляти
-    layer.on('click', () => {
-      if (confirm('Видалити цей елемент?')) {
-        drawings.removeLayer(layer);
-      }
-    });
-
-    document.getElementById('status').innerHTML = 'Елемент додано';
-  });
-
-  // ===== Очистити всі малюнки =====
-  function clearDrawings() {
-    if (confirm('Видалити всі намальовані просування?')) {
-      drawings.clearLayers();
-      document.getElementById('status').innerHTML = 'Малюнки очищено';
-    }
-  }
-
-  // ===== Завантаження DeepState (не редагований) =====
-  const url = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20261004.geojson';
-
-  fetch(url)
-    .then(r => {
-      if (!r.ok) throw new Error('Помилка HTTP ' + r.status);
-      return r.json();
-    })
-    .then(data => {
-      L.geoJSON(data, {
-        style: {
-          color: '#ef4444',
-          weight: 1.5,
-          fillColor: '#ef4444',
-          fillOpacity: 0.32,
-          interactive: false   // не можна чіпати
-        },
-        pmIgnore: true         // Geoman ігнорує цей шар
-      }).addTo(map);
-
-      document.getElementById('status').innerHTML = 
-        'Дані DeepState завантажено<br><small>4 жовтня 2026</small>';
-    })
-    .catch(err => {
-      console.error(err);
-      document.getElementById('status').innerHTML = 
-        '<span style="color:#f87171">Помилка завантаження</span><br>' + err.message;
-    });
-
-  // ===== Експорт =====
-  function downloadGeoJSON() {
-    const geojson = drawings.toGeoJSON();
-    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'ukraine_advances.geojson';
-    a.click();
-  }
-</script>
-</body>
-</html>
+  function updatePreview() {
+    if (preview) map.removeLayer(preview);
+    if (points.length === 0) { preview = null; return; }
+    preview = mode === 'zone' && points.length >= 3
+      ? L.polygon(points, { ...zoneStyle, interactive: false })
