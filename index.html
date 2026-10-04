@@ -1,57 +1,138 @@
 <!DOCTYPE html>
 <html lang="uk">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Карта України</title>
+  <title>Карта війни в Україні</title>
 
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Leaflet-Geoman -->
+  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css" />
+  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"></script>
+
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #111; color: #eee; }
-    #map { height: 100vh; width: 100%; background: #111; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1115;
+      color: #e0e0e0;
+      overflow: hidden;
+    }
 
-    .panel {
+    #map {
       position: absolute;
-      top: 15px;
-      left: 15px;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #0f1115;
+    }
+
+    /* ===== Бічна панель ===== */
+    .sidebar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 280px;
+      background: rgba(22, 25, 32, 0.92);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 18px;
       z-index: 1000;
-      background: rgba(20, 22, 28, 0.95);
-      padding: 16px;
-      border-radius: 12px;
-      width: 260px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-      border: 1px solid #333;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
     }
 
-    .panel h3 {
-      font-size: 15px;
-      margin-bottom: 12px;
+    .sidebar h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
-    button {
+    .section {
+      margin-bottom: 18px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #8b93a7;
+      margin-bottom: 8px;
+    }
+
+    /* Кнопки шарів */
+    .layer-btn {
       display: block;
       width: 100%;
-      padding: 10px;
-      margin: 6px 0;
-      border: none;
+      padding: 9px 12px;
+      margin-bottom: 6px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
       border-radius: 8px;
+      color: #ddd;
       font-size: 13px;
       cursor: pointer;
+      text-align: left;
+      transition: all 0.15s;
+    }
+    .layer-btn:hover {
+      background: rgba(255,255,255,0.1);
+    }
+    .layer-btn.active {
+      background: #2563eb;
+      border-color: #2563eb;
       color: white;
     }
 
-    .btn1 { background: #2563eb; }
-    .btn2 { background: #16a34a; }
-    .btn3 { background: #dc2626; }
+    /* Кнопки дій */
+    .action-btn {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 8px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-edit {
+      background: #3b82f6;
+      color: white;
+    }
+    .btn-edit:hover { background: #2563eb; }
+    .btn-download {
+      background: #10b981;
+      color: white;
+    }
+    .btn-download:hover { background: #059669; }
+    .btn-reset {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .btn-reset:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
 
-    #status {
-      margin-top: 12px;
+    .status {
       font-size: 12px;
-      color: #aaa;
+      color: #8b93a7;
+      margin-top: 10px;
       line-height: 1.4;
+    }
+
+    /* Приховуємо стандартні контроли Geoman трохи */
+    .leaflet-pm-toolbar {
+      margin-top: 70px !important;
     }
   </style>
 </head>
@@ -59,110 +140,159 @@
 
 <div id="map"></div>
 
-<div class="panel">
-  <h3>Карта війни</h3>
+<div class="sidebar">
+  <h2>🇺🇦 Карта війни</h2>
 
-  <button class="btn1" onclick="setSatellite()">Супутник</button>
-  <button class="btn1" onclick="setStreets()">Вулиці</button>
-  <button class="btn1" onclick="setDark()">Темна</button>
+  <div class="section">
+    <div class="section-title">Підложка</div>
+    <button class="layer-btn active" onclick="setBase('satellite')" id="btn-sat">Супутник</button>
+    <button class="layer-btn" onclick="setBase('streets')" id="btn-streets">Вулиці</button>
+    <button class="layer-btn" onclick="setBase('dark')" id="btn-dark">Темна</button>
+  </div>
 
-  <button class="btn2" onclick="downloadGeoJSON()">Завантажити GeoJSON</button>
-  <button class="btn3" onclick="location.reload()">Оновити</button>
+  <div class="section">
+    <div class="section-title">Дії</div>
+    <button class="action-btn btn-edit" onclick="toggleEdit()">Редагувати контур</button>
+    <button class="action-btn btn-download" onclick="downloadGeoJSON()">Завантажити GeoJSON</button>
+    <button class="action-btn btn-reset" onclick="location.reload()">Скинути зміни</button>
+  </div>
 
-  <div id="status">Завантаження...</div>
+  <div class="status" id="status">
+    Завантаження даних DeepState...
+  </div>
 </div>
 
 <script>
-  // Створюємо карту
+  // ===== Карта =====
   const map = L.map('map', {
-    center: [48.4, 37.5],
-    zoom: 6,
-    zoomControl: false
-  });
+    zoomControl: false,
+    attributionControl: true
+  }).setView([48.4, 37.6], 6);
 
+  // Додаємо зум справа
   L.control.zoom({ position: 'topright' }).addTo(map);
 
-  // Шари
-  const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 18,
-    attribution: 'Esri'
-  });
+  // ===== Шари підложки =====
+  const layers = {
+    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles © Esri'
+    }),
+    streets: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }),
+    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '© CARTO'
+    })
+  };
 
-  const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
-    attribution: 'OSM'
-  });
+  let currentBase = layers.satellite;
+  currentBase.addTo(map);
 
-  const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 18,
-    attribution: 'Carto'
-  });
+  function setBase(type) {
+    map.removeLayer(currentBase);
+    currentBase = layers[type];
+    currentBase.addTo(map);
 
-  let currentLayer = satellite;
-  satellite.addTo(map);
-
-  function setSatellite() {
-    map.removeLayer(currentLayer);
-    currentLayer = satellite;
-    satellite.addTo(map);
+    // Активна кнопка
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-' + (type === 'satellite' ? 'sat' : type)).classList.add('active');
   }
 
-  function setStreets() {
-    map.removeLayer(currentLayer);
-    currentLayer = streets;
-    streets.addTo(map);
-  }
+  // ===== Geoman =====
+  map.pm.addControls({
+    position: 'topleft',
+    drawMarker: false,
+    drawCircleMarker: false,
+    drawPolyline: false,
+    drawRectangle: false,
+    drawCircle: false,
+    drawText: false,
+    drawPolygon: true,
+    editMode: true,
+    dragMode: true,
+    removalMode: true,
+    cutPolygon: false
+  });
 
-  function setDark() {
-    map.removeLayer(currentLayer);
-    currentLayer = dark;
-    dark.addTo(map);
-  }
+  map.pm.setGlobalOptions({
+    pathOptions: {
+      color: '#ef4444',
+      fillColor: '#ef4444',
+      fillOpacity: 0.35,
+      weight: 2
+    }
+  });
 
   let occupiedLayer = null;
+  let editing = false;
 
-  // Завантаження даних
-  const url = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20261004.geojson';
+  // ===== Завантаження DeepState =====
+  // Актуальна дата (4 жовтня 2026)
+  const geojsonUrl = 'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data/deepstatemap_data_20261004.geojson';
 
-  fetch(url)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('HTTP помилка: ' + response.status);
-      }
-      return response.json();
+  fetch(geojsonUrl)
+    .then(r => {
+      if (!r.ok) throw new Error('Помилка завантаження');
+      return r.json();
     })
     .then(data => {
       occupiedLayer = L.geoJSON(data, {
         style: {
           color: '#ef4444',
-          weight: 2,
+          weight: 1.5,
           fillColor: '#ef4444',
-          fillOpacity: 0.4
-        }
+          fillOpacity: 0.38,
+          opacity: 0.9
+        },
+        interactive: true
       }).addTo(map);
 
-      document.getElementById('status').innerHTML = 'Дані завантажено успішно<br>4 жовтня 2026';
-    })
-    .catch(error => {
-      console.error(error);
       document.getElementById('status').innerHTML = 
-        '<span style="color:#f87171">Помилка завантаження даних</span><br>' + 
-        error.message + 
-        '<br><br>Відкрий консоль (F12) для деталей';
+        'Дані DeepState завантажено<br><small>4 жовтня 2026</small>';
+    })
+    .catch(err => {
+      console.error(err);
+      document.getElementById('status').innerHTML = 
+        '<span style="color:#f87171">Не вдалося завантажити дані</span>';
     });
 
+  // ===== Редагування =====
+  function toggleEdit() {
+    if (!occupiedLayer) return;
+
+    editing = !editing;
+
+    if (editing) {
+      map.pm.enableGlobalEditMode();
+      document.getElementById('status').innerHTML = 
+        '<span style="color:#60a5fa">Режим редагування увімкнено</span><br>Тягни вершини контуру';
+    } else {
+      map.pm.disableGlobalEditMode();
+      document.getElementById('status').innerHTML = 
+        'Редагування вимкнено';
+    }
+  }
+
+  // ===== Експорт =====
   function downloadGeoJSON() {
     if (!occupiedLayer) {
-      alert('Дані ще не завантажилися');
+      alert('Шар ще не завантажився');
       return;
     }
 
     const geojson = occupiedLayer.toGeoJSON();
-    const blob = new Blob([JSON.stringify(geojson, null, 2)], {type: 'application/json'});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'ukraine_occupied.geojson';
-    link.click();
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'ukraine_occupied_edited.geojson';
+    a.click();
+    
+    URL.revokeObjectURL(url);
   }
 </script>
 </body>
